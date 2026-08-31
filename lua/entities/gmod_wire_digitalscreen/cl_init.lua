@@ -1,6 +1,6 @@
 include("shared.lua")
 
-local dsDrawRate = GetConVar("wire_digitalscreen_draw_rate")
+local dsDrawRate = CreateConVar("wire_digitalscreen_draw_rate", 1, { FCVAR_REPLICATED, FCVAR_ARCHIVE }, "Draw rate for digital screen", 0.1, 1000)
 
 function ENT:SendData()
 	net.Start("wire_interactiveprop_action")
