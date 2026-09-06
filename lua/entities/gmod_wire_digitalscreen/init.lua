@@ -37,7 +37,7 @@ function ENT:UpdateOverlay()
 		return
 	end
 
-	txt = ""
+	local txt = ""
 	if IsValid(self.User) then
 		txt = "In use by: " .. self.User:Nick()
 	end
