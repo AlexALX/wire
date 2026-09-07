@@ -81,13 +81,17 @@ function ENT:OnRemove()
 end
 
 local function stringToNumber(index, str, bytes)
-	local newpos = index+bytes
-	str = str:sub(index,newpos-1)
 	local n = 0
-	for j=1,bytes do
-		n = n + str:byte(j)*(256^(j-1))
-    end
-	return n, newpos
+	local mult = 1
+
+	-- Read bytes directly from the original string using absolute offset (index + j).
+	-- This eliminates string allocations from str:sub() and prevents Garbage Collector spikes.
+	for j = 0, bytes - 1 do
+		n = n + str:byte(index + j) * mult
+		mult = mult * 256 -- Multiplication is faster than math.pow / exponentiation (256^j)
+	end
+
+	return n, index + bytes
 end
 
 local pixelbits = {3, 1, 3, 4, 1}
