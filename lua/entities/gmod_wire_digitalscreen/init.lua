@@ -92,9 +92,6 @@ function ENT:Initialize()
 
 	self.Memory = {}
 
-	self.OffsetY = 0
-	self.OffsetX = 0
-
 	self.PixelX = 0
 	self.PixelY = 0
 	self.PixelG = 0
@@ -127,50 +124,19 @@ function ENT:SendPixel()
 	if self.Memory[1048575] == 0 then return end -- why?
 	if self.PixelX < 0 then return end
 	if self.PixelY < 0 then return end
-
-	local realX = self.PixelX
-	local realY = self.PixelY
-
-	-- Recalculate physical coordinates using virtual offset
-	if self.OffsetX ~= 0 then
-		realX = (realX + self.OffsetX) % self.ScreenWidth
-	end
-	if self.OffsetY ~= 0 then
-		realY = (realY + self.OffsetY) % self.ScreenHeight
-	end
-
 	if self.PixelX >= self.ScreenWidth then return end
 	if self.PixelY >= self.ScreenHeight then return end
 
-	local address = realY * self.ScreenWidth + realX
+	local address = self.PixelY*self.ScreenWidth + self.PixelX
 	self:WriteCell(address, self.PixelG)
 end
 
 function ENT:ReadCell(Address)
 	Address = math.floor(Address)
 	if Address < 0 then return nil end
-	if Address >= 1048578 then return nil end
-    if (Address==1048577) then return math.Round(dsNetBandwidthValue/2) end -- report its netbandwidth
-    if (Address==1048576) then return dsDrawRate:GetFloat() end -- report its draw rate
-
-    local totalPixels = self.ScreenWidth * self.ScreenHeight
-	if Address < totalPixels then
-		local x = Address % self.ScreenWidth
-		local y = math.floor(Address / self.ScreenWidth)
-
-        local realX = x
-        local realY = y
-
-        -- Recalculate physical coordinates using virtual offset
-        if self.OffsetX ~= 0 then
-            realX = (realX + self.OffsetX) % self.ScreenWidth
-        end
-        if self.OffsetY ~= 0 then
-            realY = (realY + self.OffsetY) % self.ScreenHeight
-        end
-
-		return self.Memory[realY * self.ScreenWidth + realX] or 0
-	end
+	if Address >= 1048577 then return nil end
+    if (Address==1048577) then return math.Round(dsNetBandwidthValue/2) end
+    if (Address==1048576) then return dsDrawRate:GetFloat() end
     
 	return self.Memory[Address] or 0
 end
@@ -408,46 +374,98 @@ function ENT:WriteCell(Address, value)
 		end
 	else
 		if Address == 1048566 then -- Shift Y
-            local dy = value % self.ScreenHeight
+			local dy = value % self.ScreenHeight
 			if dy > self.ScreenHeight / 2 then dy = dy - self.ScreenHeight end
 			if dy < -self.ScreenHeight / 2 then dy = dy + self.ScreenHeight end
-			
-			self.OffsetY = (self.OffsetY + dy) % self.ScreenHeight
-			if self.OffsetY < 0 then self.OffsetY = self.OffsetY + self.ScreenHeight end
-			
-			if dy == 0 then return end
-			
-			local w, h = self.ScreenWidth, self.ScreenHeight
-			local colormode = self.Memory[1048569] or 0
-			
-			for y = 0, math.abs(dy) - 1 do
-				local targetRow = (dy > 0) and y or (h - math.abs(dy) + y)
-				if colormode == 1 then
-					self:ClearCellRange(targetRow * w * 3, w * 3)
-				else
-					self:ClearCellRange(targetRow * w, w)
+			if dy ~= 0 then
+				local w, h = self.ScreenWidth, self.ScreenHeight
+				local colormode = self.Memory[1048569] or 0
+				local newMem = {}
+				
+				for k, v in pairs(self.Memory) do
+					if k >= 1048500 then newMem[k] = v end
+				end
+				
+				for y = 0, h - 1 do
+					local srcY = (y - dy) % h
+					if srcY < 0 then srcY = srcY + h end
+					
+					for x = 0, w - 1 do
+						if colormode == 1 then
+							for c = 0, 2 do
+								newMem[(y * w + x) * 3 + c] = self.Memory[(srcY * w + x) * 3 + c]
+							end
+						else
+							newMem[y * w + x] = self.Memory[srcY * w + x]
+						end
+					end
+				end
+				
+				local clearColor = self.ClearColor or 0
+				for y = 0, math.abs(dy) - 1 do
+					local targetRow = (dy > 0) and y or (h - math.abs(dy) + y)
+					if colormode == 1 then
+						for x = 0, w - 1 do for c = 0, 2 do newMem[(targetRow * w + x) * 3 + c] = 0 end end
+					else
+						for x = 0, w - 1 do newMem[targetRow * w + x] = clearColor end
+					end
+				end
+				
+				for i = 0, w * h * (colormode == 1 and 3 or 1) - 1 do
+					self.Memory[i] = newMem[i]
 				end
 			end
+			self.Memory[Address] = value
+			self:MarkCellChanged(Address)
+			return true
+
 		elseif Address == 1048567 then -- Shift X
-            local dx = value % self.ScreenWidth
+			local dx = value % self.ScreenWidth
 			if dx > self.ScreenWidth / 2 then dx = dx - self.ScreenWidth end
 			if dx < -self.ScreenWidth / 2 then dx = dx + self.ScreenWidth end
-			
-			self.OffsetX = (self.OffsetX + dx) % self.ScreenWidth
-			if self.OffsetX < 0 then self.OffsetX = self.OffsetX + self.ScreenWidth end
-			
-			if dx == 0 then return end
-			
-			local w, h = self.ScreenWidth, self.ScreenHeight
-			local colormode = self.Memory[1048569] or 0
-			
-			for y = 0, h - 1 do
-				for x = 0, math.abs(dx) - 1 do
-					local targetX = (dx > 0) and x or (w - math.abs(dx) + x)
-					local addr = y * w + targetX
-					self:ClearPixel(addr)
+			if dx ~= 0 then
+				local w, h = self.ScreenWidth, self.ScreenHeight
+				local colormode = self.Memory[1048569] or 0
+				local newMem = {}
+				
+				for k, v in pairs(self.Memory) do
+					if k >= 1048500 then newMem[k] = v end
+				end
+				
+				for y = 0, h - 1 do
+					for x = 0, w - 1 do
+						local srcX = (x - dx) % w
+						if srcX < 0 then srcX = srcX + w end
+						
+						if colormode == 1 then
+							for c = 0, 2 do
+								newMem[(y * w + x) * 3 + c] = self.Memory[(y * w + srcX) * 3 + c]
+							end
+						else
+							newMem[y * w + x] = self.Memory[y * w + srcX]
+						end
+					end
+				end
+				
+				local clearColor = self.ClearColor or 0
+				for y = 0, h - 1 do
+					for x = 0, math.abs(dx) - 1 do
+						local targetX = (dx > 0) and x or (w - math.abs(dx) + x)
+						if colormode == 1 then
+							for c = 0, 2 do newMem[(y * w + targetX) * 3 + c] = 0 end
+						else
+							newMem[y * w + targetX] = clearColor
+						end
+					end
+				end
+				
+				for i = 0, w * h * (colormode == 1 and 3 or 1) - 1 do
+					self.Memory[i] = newMem[i]
 				end
 			end
+			self.Memory[Address] = value
+			self:MarkCellChanged(Address)
+			return true
 		elseif Address == 1048568 then
 			self.ClearColor = value
 		elseif Address == 1048569 then
@@ -474,8 +492,9 @@ function ENT:WriteCell(Address, value)
 			-- delete changed cells
 			self.ChangedCellRanges = {}
 			self.ChangedStep = 1
-			self.OffsetX = 0
-			self.OffsetY = 0
+            -- clear shift memory values
+            self.Memory[1048566] = 0
+            self.Memory[1048567] = 0
 
 			-- copy every value above pixel data
 			local mem = {}
@@ -494,6 +513,9 @@ function ENT:WriteCell(Address, value)
 			-- not needed atm
 		end
 	end
+     
+    -- block write for higher addresses, we can't read them anyway
+    if Address >= 1048577 then return end
 
 	self.Memory[Address] = value
 

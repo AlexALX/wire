@@ -204,10 +204,93 @@ function ENT:WriteCell(Address,value)
 	end
 	self.Memory2[Address] = value -- invisible buffer
 
-	if Address == 1048566 then -- Shift Y command     
+	if Address == 1048566 then -- Shift Y command
+		local dy = value % self.ScreenHeight
+		if dy > self.ScreenHeight / 2 then dy = dy - self.ScreenHeight end
+		if dy < -self.ScreenHeight / 2 then dy = dy + self.ScreenHeight end
+		
+		if dy ~= 0 then
+			local w, h = self.ScreenWidth, self.ScreenHeight
+			local colormode = self.Memory2[1048569] or 0
+			local newMem = {}
+			for k, v in pairs(self.Memory2) do if k >= 1048500 then newMem[k] = v end end
+			
+			for y = 0, h - 1 do
+				local srcY = (y - dy) % h
+				if srcY < 0 then srcY = srcY + h end
+				for x = 0, w - 1 do
+					if colormode == 1 then
+						for c = 0, 2 do
+							newMem[(y * w + x) * 3 + c] = self.Memory2[(srcY * w + x) * 3 + c]
+						end
+					else
+						newMem[y * w + x] = self.Memory2[srcY * w + x]
+					end
+				end
+			end
+			
+			local clearColor = self.ClearColor or 0
+			for y = 0, math.abs(dy) - 1 do
+				local targetRow = (dy > 0) and y or (h - math.abs(dy) + y)
+				if colormode == 1 then
+					for x = 0, w - 1 do for c = 0, 2 do newMem[(targetRow * w + x) * 3 + c] = 0 end end
+				else
+					for x = 0, w - 1 do newMem[targetRow * w + x] = clearColor end
+				end
+			end
+			for i = 0, w * h * (colormode == 1 and 3 or 1) - 1 do
+				self.Memory2[i] = newMem[i]
+                if (self.NewClk) then
+                    self.Memory1[i] = newMem[i]
+                end
+			end
+		end
+		
 		self.ShiftY = self.ShiftY + value
 		self.NeedRefresh = true
+
 	elseif Address == 1048567 then -- Shift X command
+		local dx = value % self.ScreenWidth
+		if dx > self.ScreenWidth / 2 then dx = dx - self.ScreenWidth end
+		if dx < -self.ScreenWidth / 2 then dx = dx + self.ScreenWidth end
+		
+		if dx ~= 0 then
+			local w, h = self.ScreenWidth, self.ScreenHeight
+			local colormode = self.Memory2[1048569] or 0
+			local newMem = {}
+			for k, v in pairs(self.Memory2) do if k >= 1048500 then newMem[k] = v end end
+			
+			for y = 0, h - 1 do
+				for x = 0, w - 1 do
+					local srcX = (x - dx) % w
+					if srcX < 0 then srcX = srcX + w end
+					if colormode == 1 then
+						for c = 0, 2 do
+							newMem[(y * w + x) * 3 + c] = self.Memory2[(y * w + srcX) * 3 + c]
+						end
+					else
+						newMem[y * w + x] = self.Memory2[y * w + srcX]
+					end
+				end
+			end
+			
+			local clearColor = self.ClearColor or 0
+			for y = 0, h - 1 do
+				for x = 0, math.abs(dx) - 1 do
+					local targetX = (dx > 0) and x or (w - math.abs(dx) + x)
+					if colormode == 1 then
+						for c = 0, 2 do newMem[(y * w + targetX) * 3 + c] = 0 end
+					else
+						newMem[y * w + targetX] = clearColor
+					end
+				end
+			end
+			for i = 0, w * h * (colormode == 1 and 3 or 1) - 1 do
+				self.Memory2[i] = newMem[i]
+				self.Memory1[i] = newMem[i]
+			end
+		end
+
 		self.ShiftX = self.ShiftX + value
 		self.NeedRefresh = true
 	elseif Address == 1048568 then -- Custom dedicated address for Fill/Clear Color
