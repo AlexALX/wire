@@ -459,7 +459,7 @@ function ENT:Draw(flags)
 
             -- 2. Clamp the shift offset within the boundaries of the current virtual screen resolution
             -- to prevent the canvas from drifting infinitely.
-            local sx = math.Clamp(math.floor(targetX), -self.ScreenWidth, self.ScreenWidth) * 2
+            local sx = math.Clamp(math.floor(targetX), -self.ScreenWidth, self.ScreenWidth)
             local sy = math.Clamp(math.floor(targetY), -self.ScreenHeight, self.ScreenHeight)
 
             -- 3. Calculate the proper background color to fill empty areas revealed during the shift.
@@ -490,8 +490,13 @@ function ENT:Draw(flags)
                     render.SetMaterial(WireGPU_matBuffer)
 
                     -- E. Draw the screen quad with the shift offset (sx, sy) and monitor scale.
-                    -- The scaleX/scaleY coefficients compensate for the Source Engine viewport proportions in this hook.
-                    render.DrawScreenQuadEx(sx, sy, 1024 * scaleX, 1024 * scaleY)
+                    -- The scaleX/scaleY coefficients compensate for the Source Engine viewport proportions in this hook.                    
+                    render.DrawScreenQuadEx(
+                        math.ceil(sx * scaleX), 
+                        math.ceil(sy * scaleY), 
+                        1024 * scaleX, 
+                        1024 * scaleY
+                    )
 
                 -- F. Restore previous filtering settings.
                 render.PopFilterMag()
