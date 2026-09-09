@@ -459,7 +459,7 @@ function ENT:Draw(flags)
 
             -- 2. Clamp the shift offset within the boundaries of the current virtual screen resolution
             -- to prevent the canvas from drifting infinitely.
-            local sx = math.Clamp(math.floor(targetX), -self.ScreenWidth, self.ScreenWidth)
+            local sx = math.Clamp(math.floor(targetX), -self.ScreenWidth, self.ScreenWidth) * 2
             local sy = math.Clamp(math.floor(targetY), -self.ScreenHeight, self.ScreenHeight)
 
             -- 3. Calculate the proper background color to fill empty areas revealed during the shift.
