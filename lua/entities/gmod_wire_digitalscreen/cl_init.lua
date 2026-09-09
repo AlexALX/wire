@@ -205,93 +205,109 @@ function ENT:WriteCell(Address,value)
 	self.Memory2[Address] = value -- invisible buffer
 
 	if Address == 1048566 then -- Shift Y command
-		local dy = value % self.ScreenHeight
+		-- Restore signed integer from unsigned uint16 network transmission
+		local rawVal = value > 32767 and value - 65536 or value
+		local dy = rawVal % self.ScreenHeight
 		if dy > self.ScreenHeight / 2 then dy = dy - self.ScreenHeight end
 		if dy < -self.ScreenHeight / 2 then dy = dy + self.ScreenHeight end
 		
 		if dy ~= 0 then
 			local w, h = self.ScreenWidth, self.ScreenHeight
 			local colormode = self.Memory2[1048569] or 0
-			local newMem = {}
-			for k, v in pairs(self.Memory2) do if k >= 1048500 then newMem[k] = v end end
+			local stride = (colormode == 1) and 3 or 1
 			
-			for y = 0, h - 1 do
-				local srcY = (y - dy) % h
-				if srcY < 0 then srcY = srcY + h end
-				for x = 0, w - 1 do
-					if colormode == 1 then
-						for c = 0, 2 do
-							newMem[(y * w + x) * 3 + c] = self.Memory2[(srcY * w + x) * 3 + c]
+			local newMem = {}
+			for addr = 1048500, 1048575 do
+				newMem[addr] = self.Memory2[addr]
+			end
+			
+			if stride == 3 then
+				for y = 0, h - 1 do
+					local srcY = y - dy
+					if srcY >= 0 and srcY < h then
+						local dstRow = y * w
+						local srcRow = srcY * w
+						for x = 0, w - 1 do
+							local dstIdx = (dstRow + x) * 3
+							local srcIdx = (srcRow + x) * 3
+							newMem[dstIdx]     = self.Memory2[srcIdx]
+							newMem[dstIdx + 1] = self.Memory2[srcIdx + 1]
+							newMem[dstIdx + 2] = self.Memory2[srcIdx + 2]
 						end
-					else
-						newMem[y * w + x] = self.Memory2[srcY * w + x]
+					end
+				end
+			else
+				for y = 0, h - 1 do
+					local srcY = y - dy
+					if srcY >= 0 and srcY < h then
+						local dstRow = y * w
+						local srcRow = srcY * w
+						for x = 0, w - 1 do
+							newMem[dstRow + x] = self.Memory2[srcRow + x]
+						end
 					end
 				end
 			end
 			
-			local clearColor = self.ClearColor or 0
-			for y = 0, math.abs(dy) - 1 do
-				local targetRow = (dy > 0) and y or (h - math.abs(dy) + y)
-				if colormode == 1 then
-					for x = 0, w - 1 do for c = 0, 2 do newMem[(targetRow * w + x) * 3 + c] = 0 end end
-				else
-					for x = 0, w - 1 do newMem[targetRow * w + x] = clearColor end
-				end
-			end
-			for i = 0, w * h * (colormode == 1 and 3 or 1) - 1 do
-				self.Memory2[i] = newMem[i]
-                if (self.NewClk) then
-                    self.Memory1[i] = newMem[i]
-                end
+			self.Memory2 = newMem
+			if self.NewClk then
+				self.Memory1 = table.Copy(newMem)
 			end
 		end
 		
-		self.ShiftY = self.ShiftY + value
+		self.ShiftY = self.ShiftY + rawVal
 		self.NeedRefresh = true
 
 	elseif Address == 1048567 then -- Shift X command
-		local dx = value % self.ScreenWidth
+		-- Restore signed integer from unsigned uint16 network transmission
+		local rawVal = value > 32767 and value - 65536 or value
+		local dx = rawVal % self.ScreenWidth
 		if dx > self.ScreenWidth / 2 then dx = dx - self.ScreenWidth end
 		if dx < -self.ScreenWidth / 2 then dx = dx + self.ScreenWidth end
-		
+        
 		if dx ~= 0 then
 			local w, h = self.ScreenWidth, self.ScreenHeight
 			local colormode = self.Memory2[1048569] or 0
+			local stride = (colormode == 1) and 3 or 1
+			
 			local newMem = {}
-			for k, v in pairs(self.Memory2) do if k >= 1048500 then newMem[k] = v end end
+			for addr = 1048500, 1048575 do
+				newMem[addr] = self.Memory2[addr]
+			end
 			
-			for y = 0, h - 1 do
-				for x = 0, w - 1 do
-					local srcX = (x - dx) % w
-					if srcX < 0 then srcX = srcX + w end
-					if colormode == 1 then
-						for c = 0, 2 do
-							newMem[(y * w + x) * 3 + c] = self.Memory2[(y * w + srcX) * 3 + c]
+			if stride == 3 then
+				for y = 0, h - 1 do
+					local rowOffset = y * w
+					for x = 0, w - 1 do
+						local srcX = x - dx
+						if srcX >= 0 and srcX < w then
+							local dstIdx = (rowOffset + x) * 3
+							local srcIdx = (rowOffset + srcX) * 3
+							newMem[dstIdx]     = self.Memory2[srcIdx]
+							newMem[dstIdx + 1] = self.Memory2[srcIdx + 1]
+							newMem[dstIdx + 2] = self.Memory2[srcIdx + 2]
 						end
-					else
-						newMem[y * w + x] = self.Memory2[y * w + srcX]
+					end
+				end
+			else
+				for y = 0, h - 1 do
+					local rowOffset = y * w
+					for x = 0, w - 1 do
+						local srcX = x - dx
+						if srcX >= 0 and srcX < w then
+							newMem[rowOffset + x] = self.Memory2[rowOffset + srcX]
+						end
 					end
 				end
 			end
 			
-			local clearColor = self.ClearColor or 0
-			for y = 0, h - 1 do
-				for x = 0, math.abs(dx) - 1 do
-					local targetX = (dx > 0) and x or (w - math.abs(dx) + x)
-					if colormode == 1 then
-						for c = 0, 2 do newMem[(y * w + targetX) * 3 + c] = 0 end
-					else
-						newMem[y * w + targetX] = clearColor
-					end
-				end
-			end
-			for i = 0, w * h * (colormode == 1 and 3 or 1) - 1 do
-				self.Memory2[i] = newMem[i]
-				self.Memory1[i] = newMem[i]
+			self.Memory2 = newMem
+			if self.NewClk then
+				self.Memory1 = table.Copy(newMem)
 			end
 		end
 
-		self.ShiftX = self.ShiftX + value
+		self.ShiftX = self.ShiftX + rawVal
 		self.NeedRefresh = true
 	elseif Address == 1048568 then -- Custom dedicated address for Fill/Clear Color
 		-- store raw value, so will be properly synced with colormode
@@ -438,18 +454,15 @@ function ENT:Draw(flags)
             local scaleX = realW / 1024
             local scaleY = realH / 1024
             
-            -- 2. Sign extension for Wiremod network data.
-            -- Negative numbers from network transmissions can arrive as unsigned uint16 values (e.g., -20 becomes 65516).
-            -- This check properly restores negative coordinate values.
-            local targetX = self.ShiftX > 32767 and self.ShiftX - 65536 or self.ShiftX
-            local targetY = self.ShiftY > 32767 and self.ShiftY - 65536 or self.ShiftY
+            local targetX = self.ShiftX
+            local targetY = self.ShiftY
 
-            -- 3. Clamp the shift offset within the boundaries of the current virtual screen resolution
+            -- 2. Clamp the shift offset within the boundaries of the current virtual screen resolution
             -- to prevent the canvas from drifting infinitely.
             local sx = math.Clamp(math.floor(targetX), -self.ScreenWidth, self.ScreenWidth)
             local sy = math.Clamp(math.floor(targetY), -self.ScreenHeight, self.ScreenHeight)
 
-            -- 4. Calculate the proper background color to fill empty areas revealed during the shift.
+            -- 3. Calculate the proper background color to fill empty areas revealed during the shift.
             local cr, cg, cb
             local colormode = self.Memory1[1048569] or 0
             if colormode == 1 then
@@ -458,7 +471,7 @@ function ENT:Draw(flags)
                 cr, cg, cb = (transformcolor[colormode] or transformcolor[0])(self.ClearColor or 0)
             end
             
-            -- 5. Switch to the GPU's virtual render target context (1024x1024 texture space).
+            -- 4. Switch to the GPU's virtual render target context (1024x1024 texture space).
             self.GPU:RenderToGPU(function()
                 -- A. Snapshot the current frame into a secondary buffer (ShiftRT),
                 -- because the GPU cannot simultaneously read from and write to the same RenderTarget (Feedback Loop).

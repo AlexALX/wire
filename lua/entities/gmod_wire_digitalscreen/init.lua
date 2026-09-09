@@ -316,9 +316,7 @@ end
 
 function ENT:Retransmit(ply)
 	self:FlushCache() -- Empty the cache
-
-	self:MarkCellChanged(1048566) -- Shift Y
-	self:MarkCellChanged(1048567) -- Shift X
+    
 	self:MarkCellChanged(1048568) -- Fill color
 	self:MarkCellChanged(1048569) -- Colormode
 	self:MarkCellChanged(1048572) -- Screen Width
@@ -377,92 +375,106 @@ function ENT:WriteCell(Address, value)
 			local dy = value % self.ScreenHeight
 			if dy > self.ScreenHeight / 2 then dy = dy - self.ScreenHeight end
 			if dy < -self.ScreenHeight / 2 then dy = dy + self.ScreenHeight end
+			
 			if dy ~= 0 then
 				local w, h = self.ScreenWidth, self.ScreenHeight
 				local colormode = self.Memory[1048569] or 0
-				local newMem = {}
+				local stride = (colormode == 1) and 3 or 1
 				
-				for k, v in pairs(self.Memory) do
-					if k >= 1048500 then newMem[k] = v end
+				-- 1. Create a new memory table and copy control/metadata registers via fast numeric loop
+				local newMem = {}
+				for addr = 1048500, 1048575 do
+					newMem[addr] = self.Memory[addr]
 				end
 				
-				for y = 0, h - 1 do
-					local srcY = (y - dy) % h
-					if srcY < 0 then srcY = srcY + h end
-					
-					for x = 0, w - 1 do
-						if colormode == 1 then
-							for c = 0, 2 do
-								newMem[(y * w + x) * 3 + c] = self.Memory[(srcY * w + x) * 3 + c]
+				-- 2. External stride branching with sparse nil-fallback (out-of-bounds left as nil to save memory)
+				if stride == 3 then
+					for y = 0, h - 1 do
+						local srcY = y - dy
+						if srcY >= 0 and srcY < h then
+							local dstRow = y * w
+							local srcRow = srcY * w
+							for x = 0, w - 1 do
+								local dstIdx = (dstRow + x) * 3
+								local srcIdx = (srcRow + x) * 3
+								newMem[dstIdx]     = self.Memory[srcIdx]
+								newMem[dstIdx + 1] = self.Memory[srcIdx + 1]
+								newMem[dstIdx + 2] = self.Memory[srcIdx + 2]
 							end
-						else
-							newMem[y * w + x] = self.Memory[srcY * w + x]
+						end
+					end
+				else
+					for y = 0, h - 1 do
+						local srcY = y - dy
+						if srcY >= 0 and srcY < h then
+							local dstRow = y * w
+							local srcRow = srcY * w
+							for x = 0, w - 1 do
+								newMem[dstRow + x] = self.Memory[srcRow + x]
+							end
 						end
 					end
 				end
 				
-				local clearColor = self.ClearColor or 0
-				for y = 0, math.abs(dy) - 1 do
-					local targetRow = (dy > 0) and y or (h - math.abs(dy) + y)
-					if colormode == 1 then
-						for x = 0, w - 1 do for c = 0, 2 do newMem[(targetRow * w + x) * 3 + c] = 0 end end
-					else
-						for x = 0, w - 1 do newMem[targetRow * w + x] = clearColor end
-					end
-				end
-				
-				for i = 0, w * h * (colormode == 1 and 3 or 1) - 1 do
-					self.Memory[i] = newMem[i]
-				end
+				-- 3. Swap the reference
+				self.Memory = newMem
 			end
+			
 			self.Memory[Address] = value
-			self:MarkCellChanged(Address)
+			self:MarkCellChanged(Address) -- Only sync the shift command over network
 			return true
 
-		elseif Address == 1048567 then -- Shift X
+		elseif Address == 1048567 then -- Shift X        
 			local dx = value % self.ScreenWidth
 			if dx > self.ScreenWidth / 2 then dx = dx - self.ScreenWidth end
 			if dx < -self.ScreenWidth / 2 then dx = dx + self.ScreenWidth end
+			
 			if dx ~= 0 then
 				local w, h = self.ScreenWidth, self.ScreenHeight
 				local colormode = self.Memory[1048569] or 0
+				local stride = (colormode == 1) and 3 or 1
+				
+				-- 1. Create a new memory table and copy control/metadata registers via fast numeric loop
 				local newMem = {}
-				
-				for k, v in pairs(self.Memory) do
-					if k >= 1048500 then newMem[k] = v end
+				for addr = 1048500, 1048575 do
+					newMem[addr] = self.Memory[addr]
 				end
 				
-				for y = 0, h - 1 do
-					for x = 0, w - 1 do
-						local srcX = (x - dx) % w
-						if srcX < 0 then srcX = srcX + w end
-						
-						if colormode == 1 then
-							for c = 0, 2 do
-								newMem[(y * w + x) * 3 + c] = self.Memory[(y * w + srcX) * 3 + c]
+				-- 2. Correct shift mapping preserving stride structure
+				if stride == 3 then
+					for y = 0, h - 1 do
+						local rowOffset = y * w
+						for x = 0, w - 1 do
+							local srcX = x - dx
+							if srcX >= 0 and srcX < w then
+								local dstPixelIdx = rowOffset + x
+								local srcPixelIdx = rowOffset + srcX
+								
+								local dstIdx = dstPixelIdx * 3
+								local srcIdx = srcPixelIdx * 3
+								
+								newMem[dstIdx]     = self.Memory[srcIdx]
+								newMem[dstIdx + 1] = self.Memory[srcIdx + 1]
+								newMem[dstIdx + 2] = self.Memory[srcIdx + 2]
 							end
-						else
-							newMem[y * w + x] = self.Memory[y * w + srcX]
+						end
+					end
+				else
+					for y = 0, h - 1 do
+						local rowOffset = y * w
+						for x = 0, w - 1 do
+							local srcX = x - dx
+							if srcX >= 0 and srcX < w then
+								newMem[rowOffset + x] = self.Memory[rowOffset + srcX]
+							end
 						end
 					end
 				end
 				
-				local clearColor = self.ClearColor or 0
-				for y = 0, h - 1 do
-					for x = 0, math.abs(dx) - 1 do
-						local targetX = (dx > 0) and x or (w - math.abs(dx) + x)
-						if colormode == 1 then
-							for c = 0, 2 do newMem[(y * w + targetX) * 3 + c] = 0 end
-						else
-							newMem[y * w + targetX] = clearColor
-						end
-					end
-				end
-				
-				for i = 0, w * h * (colormode == 1 and 3 or 1) - 1 do
-					self.Memory[i] = newMem[i]
-				end
+				-- 3. Swap the reference
+				self.Memory = newMem
 			end
+			
 			self.Memory[Address] = value
 			self:MarkCellChanged(Address)
 			return true
